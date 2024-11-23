@@ -310,14 +310,16 @@ namespace Dapper.Contrib.Extensions
 
         /// <summary>
         /// Inserts an entity into table "Ts" and returns identity id or number of inserted rows if inserting a list.
+        /// OBS, 09.08.2024, forceInsertKeyColumns ekliyorum, 
         /// </summary>
         /// <typeparam name="T">The type to insert.</typeparam>
         /// <param name="connection">Open SqlConnection</param>
         /// <param name="entityToInsert">Entity to insert, can be list of entities</param>
         /// <param name="transaction">The transaction to run under, null (the default) if none</param>
         /// <param name="commandTimeout">Number of seconds before command execution timeout</param>
+        /// <param name="forceInsertKeyColumns"></param>
         /// <returns>Identity of inserted entity, or number of inserted rows if inserting a list</returns>
-        public static long Insert<T>(this IDbConnection connection, T entityToInsert, IDbTransaction transaction = null, int? commandTimeout = null) where T : class
+        public static long Insert<T>(this IDbConnection connection, T entityToInsert, IDbTransaction transaction = null, int? commandTimeout = null, bool forceInsertKeyColumns=false) where T : class
         {
             var isList = false;
 
@@ -347,30 +349,67 @@ namespace Dapper.Contrib.Extensions
             var allProperties = TypePropertiesCache(type);
             var keyProperties = KeyPropertiesCache(type);
             var computedProperties = ComputedPropertiesCache(type);
-            var allPropertiesExceptKeyAndComputed = allProperties.Except(keyProperties.Union(computedProperties)).ToList();
+
+            List<PropertyInfo> columnsToInsert = new List<PropertyInfo>();
+
+            if (forceInsertKeyColumns)
+            {
+                columnsToInsert = allProperties.Except(computedProperties).ToList();
+            }
+            else
+            {
+                columnsToInsert = allProperties.Except(keyProperties.Union(computedProperties)).ToList();
+            }
+
+
+            //var allPropertiesExceptKeyAndComputed = allProperties.Except(keyProperties.Union(computedProperties)).ToList();
 
             var adapter = GetFormatter(connection);
-
+            /*
             for (var i = 0; i < allPropertiesExceptKeyAndComputed.Count; i++)
             {
                 var property = allPropertiesExceptKeyAndComputed[i];
                 adapter.AppendColumnName(sbColumnList, property.Name);  //fix for issue #336
                 if (i < allPropertiesExceptKeyAndComputed.Count - 1)
                     sbColumnList.Append(", ");
+            }*/
+
+            for (var i = 0; i < columnsToInsert.Count; i++)
+            {
+                var property = columnsToInsert[i];
+                adapter.AppendColumnName(sbColumnList, property.Name);  //fix for issue #336
+                if (i < columnsToInsert.Count - 1)
+                    sbColumnList.Append(", ");
             }
+            
 
             var sbParameterList = new StringBuilder(null);
-            for (var i = 0; i < allPropertiesExceptKeyAndComputed.Count; i++)
+
+            /*for (var i = 0; i < allPropertiesExceptKeyAndComputed.Count; i++)
             {
                 var property = allPropertiesExceptKeyAndComputed[i];
                 sbParameterList.AppendFormat("@{0}", property.Name);
                 if (i < allPropertiesExceptKeyAndComputed.Count - 1)
                     sbParameterList.Append(", ");
+            }*/
+
+            for (var i = 0; i < columnsToInsert.Count; i++)
+            {
+                var property = columnsToInsert[i];
+                sbParameterList.AppendFormat("@{0}", property.Name);
+                if (i < columnsToInsert.Count - 1)
+                    sbParameterList.Append(", ");
             }
 
-            int returnVal;
+
+                int returnVal;
             var wasClosed = connection.State == ConnectionState.Closed;
             if (wasClosed) connection.Open();
+
+            if (forceInsertKeyColumns)
+                {
+                connection.Execute($"SET IDENTITY_INSERT {name} ON; ");
+                }
 
             if (!isList)    //single entity
             {
